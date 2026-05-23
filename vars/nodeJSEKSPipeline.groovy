@@ -67,7 +67,7 @@ def call (Map configMap){
                         waitForQualityGate abortPipeline: true
                     }
                 }
-    ,       }
+            }
              stage('Dependabot Security Scan') {
             steps {
                 script {
