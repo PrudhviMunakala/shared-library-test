@@ -70,6 +70,7 @@ def call (Map configMap){
             }
             stage('Dependabot Security Scan') {
                 steps {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
                     script {
                         def repoOwner = 'PrudhviMunakala'
                         def repoName  = "${component}"
@@ -130,6 +131,7 @@ def call (Map configMap){
                             error("Pipeline failed: Found ${criticalAlerts.size()} CRITICAL and ${highAlerts.size()} HIGH Dependabot alerts.")
                         }
                     }
+                    } 
                 }
             }
             stage('Build Image') {        // ← only docker build here
