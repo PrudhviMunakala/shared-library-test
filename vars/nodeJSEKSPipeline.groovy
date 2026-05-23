@@ -68,127 +68,124 @@ def call (Map configMap){
                     }
                 }
             }
-             stage('Dependabot Security Scan') {
-            steps {
-                script {
-                    def repoOwner = 'PrudhviMunakala'
-                    def repoName  = "${component}"
+            stage('Dependabot Security Scan') {
+                steps {
+                    script {
+                        def repoOwner = 'PrudhviMunakala'
+                        def repoName  = "${component}"
 
-                    def response = sh(
-                        script: """
-                            curl -s -w "\\nHTTP_STATUS:%{http_code}" \\
-                            -H "Authorization: Bearer \${GITHUB_TOKEN}" \\
-                            -H "Accept: application/vnd.github+json" \\
-                            -H "X-GitHub-Api-Version: 2022-11-28" \\
-                            "https://api.github.com/repos/${repoOwner}/${repoName}/dependabot/alerts?state=open&severity=high,critical&per_page=100"
-                        """,
-                        returnStdout: true
-                    ).trim()
+                        def response = sh(
+                            script: """
+                                curl -s -w "\\nHTTP_STATUS:%{http_code}" \\
+                                -H "Authorization: Bearer \${GITHUB_TOKEN}" \\
+                                -H "Accept: application/vnd.github+json" \\
+                                -H "X-GitHub-Api-Version: 2022-11-28" \\
+                                "https://api.github.com/repos/${repoOwner}/${repoName}/dependabot/alerts?state=open&severity=high,critical&per_page=100"
+                            """,
+                            returnStdout: true
+                        ).trim()
 
-                    def bodyAndStatus = response.split('HTTP_STATUS:')
-                    def responseBody  = bodyAndStatus[0].trim()
-                    def httpStatus    = bodyAndStatus[1].trim()
+                        def bodyAndStatus = response.split('HTTP_STATUS:')
+                        def responseBody  = bodyAndStatus[0].trim()
+                        def httpStatus    = bodyAndStatus[1].trim()
 
-                    if (httpStatus != '200') {
-                        error("GitHub API call failed with HTTP ${httpStatus}. Check your GITHUB_TOKEN and repo permissions.")
-                    }
-
-                    def alerts      = readJSON text: responseBody
-                    def totalAlerts = alerts.size()
-
-                    if (totalAlerts == 0) {
-                        echo "✅ No HIGH or CRITICAL Dependabot alerts found. Pipeline is safe to proceed."
-                    } else {
-                        def criticalAlerts = alerts.findAll { it.security_advisory?.severity?.toUpperCase() == 'CRITICAL' }
-                        def highAlerts     = alerts.findAll { it.security_advisory?.severity?.toUpperCase() == 'HIGH' }
-
-                        echo "❌ Dependabot Security Scan FAILED!"
-                        echo "   CRITICAL : ${criticalAlerts.size()}"
-                        echo "   HIGH     : ${highAlerts.size()}"
-                        echo "=== Vulnerable Packages ==="
-
-                        alerts.each { alert ->
-                            def severity  = alert.security_advisory?.severity?.toUpperCase()
-                            def pkg       = alert.dependency?.package?.name
-                            def ecosystem = alert.dependency?.package?.ecosystem
-                            def cvss      = alert.security_advisory?.cvss?.score ?: 'N/A'
-                            def cveId     = alert.security_advisory?.cve_id      ?: 'N/A'
-                            def summary   = alert.security_advisory?.summary     ?: 'N/A'
-                            def fixedIn   = alert.security_vulnerability?.first_patched_version?.identifier ?: 'No fix available'
-                            def alertUrl  = alert.html_url
-
-                            echo """
-                            ----------------------------------------
-                            [${severity}] ${pkg} (${ecosystem})
-                            CVE      : ${cveId}
-                            CVSS     : ${cvss}
-                            Summary  : ${summary}
-                            Fix In   : ${fixedIn}
-                            URL      : ${alertUrl}
-                            ----------------------------------------"""
+                        if (httpStatus != '200') {
+                            error("GitHub API call failed with HTTP ${httpStatus}. Check your GITHUB_TOKEN and repo permissions.")
                         }
-                        error("Pipeline failed: Found ${criticalAlerts.size()} CRITICAL and ${highAlerts.size()} HIGH Dependabot alerts.")
+
+                        def alerts      = readJSON text: responseBody
+                        def totalAlerts = alerts.size()
+
+                        if (totalAlerts == 0) {
+                            echo "✅ No HIGH or CRITICAL Dependabot alerts found. Pipeline is safe to proceed."
+                        } else {
+                            def criticalAlerts = alerts.findAll { it.security_advisory?.severity?.toUpperCase() == 'CRITICAL' }
+                            def highAlerts     = alerts.findAll { it.security_advisory?.severity?.toUpperCase() == 'HIGH' }
+
+                            echo "❌ Dependabot Security Scan FAILED!"
+                            echo "   CRITICAL : ${criticalAlerts.size()}"
+                            echo "   HIGH     : ${highAlerts.size()}"
+                            echo "=== Vulnerable Packages ==="
+
+                            alerts.each { alert ->
+                                def severity  = alert.security_advisory?.severity?.toUpperCase()
+                                def pkg       = alert.dependency?.package?.name
+                                def ecosystem = alert.dependency?.package?.ecosystem
+                                def cvss      = alert.security_advisory?.cvss?.score ?: 'N/A'
+                                def cveId     = alert.security_advisory?.cve_id      ?: 'N/A'
+                                def summary   = alert.security_advisory?.summary     ?: 'N/A'
+                                def fixedIn   = alert.security_vulnerability?.first_patched_version?.identifier ?: 'No fix available'
+                                def alertUrl  = alert.html_url
+
+                                echo """
+                                ----------------------------------------
+                                [${severity}] ${pkg} (${ecosystem})
+                                CVE      : ${cveId}
+                                CVSS     : ${cvss}
+                                Summary  : ${summary}
+                                Fix In   : ${fixedIn}
+                                URL      : ${alertUrl}
+                                ----------------------------------------"""
+                            }
+                            error("Pipeline failed: Found ${criticalAlerts.size()} CRITICAL and ${highAlerts.size()} HIGH Dependabot alerts.")
+                        }
                     }
                 }
             }
-        }
-
-        stage('Build Image') {        // ← only docker build here
-            steps {
-                sh """
-                    docker build -t ${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion} .
-                """
-            }
-        }
-
-        stage('Trivy Image Scan') {
-            steps {
-                script {
-                    def imageName = "${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion}"
-
+            stage('Build Image') {        // ← only docker build here
+                steps {
                     sh """
-                        trivy image \
-                            --severity HIGH,CRITICAL \
-                            --vuln-type os \
-                            --exit-code 0 \
-                            --quiet \
-                            --format template \
-                            --template "@/usr/local/share/trivy/templates/html.tpl" \
-                            --output trivy-report.html \
-                            ${imageName}
+                        docker build -t ${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion} .
                     """
+                }
+            }
+            stage('Trivy Image Scan') {
+                steps {
+                    script {
+                        def imageName = "${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion}"
 
-                    def trivyExitCode = sh(
-                        script: """
+                        sh """
                             trivy image \
                                 --severity HIGH,CRITICAL \
                                 --vuln-type os \
-                                --exit-code 1 \
+                                --exit-code 0 \
                                 --quiet \
+                                --format template \
+                                --template "@/usr/local/share/trivy/templates/html.tpl" \
+                                --output trivy-report.html \
                                 ${imageName}
-                        """,
-                        returnStatus: true
-                    )
+                        """
 
-                    if (trivyExitCode == 1) {
-                        error("❌ Trivy scan FAILED: HIGH or CRITICAL OS vulnerabilities found.")
-                    } else {
-                        echo "✅ Trivy scan PASSED: No HIGH or CRITICAL OS vulnerabilities found."
+                        def trivyExitCode = sh(
+                            script: """
+                                trivy image \
+                                    --severity HIGH,CRITICAL \
+                                    --vuln-type os \
+                                    --exit-code 1 \
+                                    --quiet \
+                                    ${imageName}
+                            """,
+                            returnStatus: true
+                        )
+
+                        if (trivyExitCode == 1) {
+                            error("❌ Trivy scan FAILED: HIGH or CRITICAL OS vulnerabilities found.")
+                        } else {
+                            echo "✅ Trivy scan PASSED: No HIGH or CRITICAL OS vulnerabilities found."
+                        }
+                    }
+                }
+            
+            }
+            stage('Push Image') {    
+                steps {
+                    withAWS(credentials: 'aws-creds', region: "${region}") {
+                        sh """
+                            aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${acc_id}.dkr.ecr.${region}.amazonaws.com
+                            docker push ${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion}
+                        """
                     }
                 }
             }
-           
         }
-
-        stage('Push Image') {    
-            steps {
-                withAWS(credentials: 'aws-creds', region: "${region}") {
-                    sh """
-                        aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${acc_id}.dkr.ecr.${region}.amazonaws.com
-                        docker push ${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion}
-                    """
-                }
-            }
-        }
- }
 }
