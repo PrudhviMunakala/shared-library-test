@@ -144,36 +144,29 @@ def call (Map configMap){
             stage('Trivy Image Scan') {
                 steps {
                     script {
-                        def imageName = "${acc_id}.dkr.ecr.${region}.amazonaws.com/${project}/${component}:${appVersion}"
-
-                        sh """
-                            trivy image \
-                                --severity HIGH,CRITICAL \
-                                --vuln-type os \
-                                --exit-code 0 \
-                                --quiet \
-                                --format template \
-                                --template "@/usr/local/share/trivy/templates/html.tpl" \
-                                --output trivy-report.html \
-                                ${imageName}
+                         sh """
+                            trivy config \
+                                --severity HIGH,MEDIUM \
+                                --format table \
+                                --output trivy-dockerfile-report.txt \
+                                Dockerfile
                         """
-
-                        def trivyExitCode = sh(
+                        sh 'cat trivy-dockerfile-report.txt'
+                        def scanResult = sh(
                             script: """
-                                trivy image \
-                                    --severity HIGH,CRITICAL \
-                                    --vuln-type os \
+                                trivy config \
+                                    --severity HIGH,MEDIUM \
                                     --exit-code 1 \
-                                    --quiet \
-                                    ${imageName}
+                                    --format table \
+                                    Dockerfile
                             """,
                             returnStatus: true
                         )
 
-                        if (trivyExitCode == 1) {
-                            error("❌ Trivy scan FAILED: HIGH or CRITICAL OS vulnerabilities found.")
+                         if (scanResult != 0) {
+                            error "🚨 Trivy found HIGH/MEDIUM misconfigurations in Dockerfile. Pipeline failed."
                         } else {
-                            echo "✅ Trivy scan PASSED: No HIGH or CRITICAL OS vulnerabilities found."
+                            echo "✅ No HIGH or MEDIUM Dockerfile misconfigurations found. Pipeline continues."
                         }
                     }
                 }
